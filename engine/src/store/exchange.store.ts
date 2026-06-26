@@ -1,0 +1,67 @@
+export type Side = "buy" | "sell";
+export type OrderType = "limit" | "market";
+export type OrderStatus = "open" | "partially_filled" | "filled" | "cancelled";
+
+export interface Stock {
+  id: number;
+  title: string;
+  symbol: string;
+}
+
+export interface Balance {
+  available: number;
+  locked: number;
+}
+
+export interface Fill {
+  fillId: string;
+  symbol: string;
+  price: number;
+  qty: number;
+  buyOrderId: string;
+  sellOrderId: string;
+  createdAt: number;
+}
+
+export interface OrderRecord {
+  orderId: string;
+  userId: string;
+  side: Side;
+  type: OrderType;
+  symbol: string;
+  price: number | null;
+  qty: number;
+  filledQty: number;
+  status: OrderStatus;
+  fills: Fill[];
+  createdAt: number;
+}
+
+export interface RestingOrder {
+  orderId: string;
+  userId: string;
+  side: Side;
+  type: "limit";
+  symbol: string;
+  price: number;
+  qty: number;
+  filledQty: number;
+  status: OrderStatus;
+  createdAt: number;
+}
+
+export interface OrderBook {
+  bids: Map<number, RestingOrder[]>;
+  asks: Map<number, RestingOrder[]>;
+}
+
+export const STOCKS: Stock[] = [
+  { id: 1, title: "Bitcoin", symbol: "BTC" },
+  { id: 2, title: "Ethereum", symbol: "ETH" },
+  { id: 3, title: "Solana", symbol: "SOL" },
+];
+
+export const BALANCES = new Map<string, Record<string, Balance>>();
+export const ORDERS = new Map<string, OrderRecord>();
+export const FILLS: Fill[] = [];
+export const ORDERBOOKS = new Map<string, OrderBook>();

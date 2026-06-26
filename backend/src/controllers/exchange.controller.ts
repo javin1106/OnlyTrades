@@ -4,6 +4,7 @@ import {
   orderIdParamSchema,
   symbolParamSchema,
 } from "../types/exchangeSchema.types.js";
+import { sendToEngine } from "../utils/redisClient.js";
 
 export async function createOrder(req: Request, res: Response): Promise<void> {
   const result = orderBodySchema.safeParse(req.body);
@@ -15,10 +16,22 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  res.status(501).json({
-    error: "Order engine not implemented",
-    order: result.data,
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const engineResponse = await sendToEngine("create_order", {
+    userId,
+    ...result.data,
   });
+
+  res
+    .status(engineResponse.ok ? 200 : 400)
+    .json(
+      engineResponse.ok ? engineResponse.data : { error: engineResponse.error },
+    );
 }
 
 export async function cancelOrder(req: Request, res: Response): Promise<void> {
