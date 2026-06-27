@@ -3,9 +3,10 @@ import {
   cancelOrder,
   createOrder,
   getBalance,
+  getDepth,
   getFills,
-  getOrderBook,
   getOrders,
+  getOrder,
   getStocks,
 } from "../controllers/exchange.controller.js";
 import { requireAuth } from "../middlewares/auth.middlewares.js";
@@ -15,7 +16,8 @@ export const exchangeRouter = Router();
 exchangeRouter.post("/order", requireAuth, createOrder);
 exchangeRouter.delete("/order/:orderId", requireAuth, cancelOrder);
 exchangeRouter.get("/orders", requireAuth, getOrders);
-exchangeRouter.get("/orderbook/:symbol", requireAuth, getOrderBook);
+exchangeRouter.get("/order/:orderId", requireAuth, getOrder);
+exchangeRouter.get("/depth/:symbol", requireAuth, getDepth);
 exchangeRouter.get("/fills/:symbol", requireAuth, getFills);
 exchangeRouter.get("/stocks", requireAuth, getStocks);
 exchangeRouter.get("/balance", requireAuth, getBalance);

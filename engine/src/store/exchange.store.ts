@@ -50,6 +50,17 @@ export interface RestingOrder {
   createdAt: number;
 }
 
+export interface DepthLevel {
+  price: number;
+  qty: number;
+}
+
+export interface DepthResponse {
+  symbol: string;
+  bids: DepthLevel[];
+  asks: DepthLevel[];
+}
+
 export interface OrderBook {
   bids: Map<number, RestingOrder[]>;
   asks: Map<number, RestingOrder[]>;

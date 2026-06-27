@@ -1,13 +1,23 @@
 import "dotenv/config";
 import { createClient } from "redis";
-import { getUserBalance } from "./services/exchange.service.js";
+import {
+  getDepth,
+  getStocks,
+  getUserBalance,
+  getOrder,
+  getUserOrders,
+  getFills,
+} from "./services/exchange.service.js";
 
 type EngineCommandType =
   | "create_order"
   | "get_depth"
   | "get_user_balance"
   | "get_order"
-  | "cancel_order";
+  | "get_orders"
+  | "cancel_order"
+  | "get_fills"
+  | "get_stocks";
 
 interface EngineRequest {
   correlationId: string;
@@ -56,8 +66,16 @@ function handleEngineRequest(message: EngineRequest): unknown {
         note: "Dummy engine response. Matching logic comes next.",
       };
 
-    case "get_depth":
-      throw new Error("Get depth not implemented yet");
+    case "get_depth": {
+      const symbol = message.payload.symbol;
+
+      if (typeof symbol !== "string") {
+        throw new Error("symbol is required");
+      }
+
+      return getDepth(symbol);
+    }
+
     case "get_user_balance": {
       const userId = message.payload.userId;
 
@@ -67,10 +85,47 @@ function handleEngineRequest(message: EngineRequest): unknown {
 
       return getUserBalance(userId);
     }
-    case "get_order":
-      throw new Error("Get order not implemented yet");
+
+    case "get_orders": {
+      const userId = message.payload.userId;
+
+      if (typeof userId !== "string") {
+        throw new Error("userId is required");
+      }
+
+      return getUserOrders(userId);
+    }
+
+    case "get_order": {
+      const userId = message.payload.userId;
+      const orderId = message.payload.orderId;
+
+      if (typeof userId !== "string") {
+        throw new Error("userId is required");
+      }
+
+      if (typeof orderId !== "string") {
+        throw new Error("orderId is required");
+      }
+
+      return getOrder(userId, orderId);
+    }
+
+    case "get_fills": {
+      const symbol = message.payload.symbol;
+      if (typeof symbol !== "string") {
+        throw new Error("symbol is required");
+      }
+
+      return getFills(symbol);
+    }
+
     case "cancel_order":
       throw new Error("Cancel order not implemented yet");
+
+    case "get_stocks":
+      return getStocks();
+
     default:
       throw new Error("Unknown engine command");
   }

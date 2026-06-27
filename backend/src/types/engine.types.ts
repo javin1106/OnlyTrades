@@ -3,7 +3,10 @@ export type EngineCommandType =
   | "get_depth"
   | "get_user_balance"
   | "get_order"
-  | "cancel_order";
+  | "cancel_order"
+  | "get_orders"
+  | "get_fills"
+  | "get_stocks";
 
 // Outbound message to the engine
 export interface EngineRequest {
