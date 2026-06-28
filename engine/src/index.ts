@@ -7,6 +7,7 @@ import {
   getOrder,
   getUserOrders,
   getFills,
+  createOrder,
 } from "./services/exchange.service.js";
 
 type EngineCommandType =
@@ -56,15 +57,28 @@ async function sendResponse(
 
 function handleEngineRequest(message: EngineRequest): unknown {
   switch (message.type) {
-    case "create_order":
-      return {
-        orderId: crypto.randomUUID(),
-        status: "open",
-        filledQty: 0,
-        fills: [],
-        receivedPayload: message.payload,
-        note: "Dummy engine response. Matching logic comes next.",
-      };
+    case "create_order": {
+      const { userId, type, side, symbol, price, qty } = message.payload;
+      if (typeof userId !== "string") throw new Error("userId is required");
+      if (type !== "limit") {
+        throw new Error("Market orders are not implemented yet");
+      }
+      if (side !== "buy" && side !== "sell") throw new Error("side is invalid");
+      if (typeof symbol !== "string") throw new Error("symbol is required");
+      if (typeof qty !== "number") throw new Error("qty is required");
+      if (typeof price !== "number") {
+        throw new Error("price is required for limit orders");
+      }
+
+      return createOrder({
+        userId,
+        type,
+        side,
+        symbol,
+        price,
+        qty,
+      });
+    }
 
     case "get_depth": {
       const symbol = message.payload.symbol;

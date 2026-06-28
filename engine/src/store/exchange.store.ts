@@ -37,6 +37,15 @@ export interface OrderRecord {
   createdAt: number;
 }
 
+export interface CreateOrderInput {
+  userId: string;
+  type: OrderType;
+  side: Side;
+  symbol: string;
+  price: number;
+  qty: number;
+}
+
 export interface RestingOrder {
   orderId: string;
   userId: string;

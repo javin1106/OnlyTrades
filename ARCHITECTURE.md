@@ -156,3 +156,11 @@ Step by step:
 Use Redis queues for backend-to-engine communication, as required by the assignment README.
 
 Do not continue with the temporary HTTP engine idea.
+
+## Future Optimization Notes
+
+- Replace the beginner TypeScript matching scans with a production-grade matching engine data structure later.
+- The specific hot path to revisit is best bid / best ask lookup, price-level traversal, and order insertion/removal.
+- A later production version could move the matching engine core to C++ or Rust with sorted price levels, FIFO queues per price, and direct best bid / best ask access.
+- For the assignment version, keep the TypeScript `Map<number, RestingOrder[]>` implementation because it is easier to reason about and test.
+- Replace the current default seeded balances with a real deposit, admin funding, or ledger-backed balance flow later. The assignment version gives new users test INR and asset balances only so order matching can be exercised.
