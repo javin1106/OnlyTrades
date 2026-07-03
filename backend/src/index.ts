@@ -3,6 +3,7 @@ import "dotenv/config";
 import { authRouter } from "./routes/auth.routes.js";
 import { exchangeRouter } from "./routes/exchange.routes.js";
 import { connectRedis, listenForEngineResponses } from "./utils/redisClient.js";
+import { securityHeaders } from "./middlewares/securityHeaders.middlewares.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 
@@ -10,7 +11,8 @@ await connectRedis();
 void listenForEngineResponses(); // let run in background
 
 const app = express();
-app.use(express.json());
+app.use(securityHeaders);
+app.use(express.json({ limit: "100kb" }));
 
 app.get("/health", (req, res) => {
   res.status(200).json({

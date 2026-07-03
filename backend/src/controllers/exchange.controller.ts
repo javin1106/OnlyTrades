@@ -22,9 +22,20 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  let idempotencyKey: string | null;
+  try {
+    idempotencyKey = getIdempotencyKey(req);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Invalid idempotency key",
+    });
+    return;
+  }
+
   const engineResponse = await sendToEngine("create_order", {
     userId,
     ...result.data,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   });
 
   res
@@ -64,6 +75,22 @@ export async function cancelOrder(req: Request, res: Response): Promise<void> {
     .json(
       engineResponse.ok ? engineResponse.data : { error: engineResponse.error },
     );
+}
+
+function getIdempotencyKey(req: Request): string | null {
+  const rawKey = req.header("Idempotency-Key");
+
+  if (!rawKey) return null;
+
+  const idempotencyKey = rawKey.trim();
+
+  if (!idempotencyKey) return null;
+
+  if (idempotencyKey.length > 128) {
+    throw new Error("Idempotency-Key is too long");
+  }
+
+  return idempotencyKey;
 }
 
 export async function getOrders(req: Request, res: Response): Promise<void> {

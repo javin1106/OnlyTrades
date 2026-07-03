@@ -10,11 +10,17 @@ import {
   getStocks,
 } from "../controllers/exchange.controller.js";
 import { requireAuth } from "../middlewares/auth.middlewares.js";
+import { orderWriteRateLimiter } from "../middlewares/rateLimit.middlewares.js";
 
 export const exchangeRouter = Router();
 
-exchangeRouter.post("/order", requireAuth, createOrder);
-exchangeRouter.delete("/order/:orderId", requireAuth, cancelOrder);
+exchangeRouter.post("/order", requireAuth, orderWriteRateLimiter, createOrder);
+exchangeRouter.delete(
+  "/order/:orderId",
+  requireAuth,
+  orderWriteRateLimiter,
+  cancelOrder,
+);
 exchangeRouter.get("/orders", requireAuth, getOrders);
 exchangeRouter.get("/order/:orderId", requireAuth, getOrder);
 exchangeRouter.get("/depth/:symbol", requireAuth, getDepth);

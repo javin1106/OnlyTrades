@@ -59,7 +59,7 @@ async function sendResponse(
 function handleEngineRequest(message: EngineRequest): unknown {
   switch (message.type) {
     case "create_order": {
-      const { userId, type, side, symbol, price, qty, maxSpend } =
+      const { userId, type, side, symbol, price, qty, maxSpend, idempotencyKey } =
         message.payload;
       if (typeof userId !== "string") throw new Error("userId is required");
       if (type !== "limit" && type !== "market") {
@@ -77,6 +77,13 @@ function handleEngineRequest(message: EngineRequest): unknown {
         throw new Error("maxSpend is required for market buy orders");
       }
 
+      if (
+        idempotencyKey !== undefined &&
+        typeof idempotencyKey !== "string"
+      ) {
+        throw new Error("idempotencyKey must be a string");
+      }
+
       const orderPrice = type === "limit" ? (price as number) : null;
 
       return createOrder({
@@ -87,6 +94,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
         price: orderPrice,
         qty,
         ...(typeof maxSpend === "number" ? { maxSpend } : {}),
+        ...(typeof idempotencyKey === "string" ? { idempotencyKey } : {}),
       });
     }
 

@@ -45,6 +45,7 @@ export interface CreateOrderInput {
   price: number | null;
   qty: number;
   maxSpend?: number;
+  idempotencyKey?: string;
 }
 
 export interface RestingOrder {
@@ -86,3 +87,4 @@ export const BALANCES = new Map<string, Record<string, Balance>>();
 export const ORDERS = new Map<string, OrderRecord>();
 export const FILLS: Fill[] = [];
 export const ORDERBOOKS = new Map<string, OrderBook>();
+export const IDEMPOTENCY_KEYS = new Map<string, string>();

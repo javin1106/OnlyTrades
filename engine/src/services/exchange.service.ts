@@ -4,6 +4,7 @@ import {
   ORDERBOOKS,
   ORDERS,
   FILLS,
+  IDEMPOTENCY_KEYS,
   type Fill,
   type OrderRecord,
   type CreateOrderInput,
@@ -167,6 +168,19 @@ export function cancelOrder(userId: string, orderId: string): OrderRecord {
 }
 
 export function createOrder(input: CreateOrderInput): OrderRecord {
+  const idempotencyStoreKey = getIdempotencyStoreKey(input);
+  if (idempotencyStoreKey) {
+    const existingOrderId = IDEMPOTENCY_KEYS.get(idempotencyStoreKey);
+    if (existingOrderId) {
+      const existingOrder = ORDERS.get(existingOrderId);
+      if (!existingOrder) {
+        throw new Error("Idempotent order record missing");
+      }
+
+      return existingOrder;
+    }
+  }
+
   assertStockExists(input.symbol);
   const balances = getUserBalance(input.userId);
   let marketBuyRemainingSpend =
@@ -226,10 +240,13 @@ export function createOrder(input: CreateOrderInput): OrderRecord {
   };
 
   ORDERS.set(order.orderId, order);
+  if (idempotencyStoreKey) {
+    IDEMPOTENCY_KEYS.set(idempotencyStoreKey, order.orderId);
+  }
 
   if (input.side === "buy") {
     while (order.qty - order.filledQty > 0) {
-      const bestPrice = bestAskPrice(input.symbol);
+      const bestPrice = bestAskPrice(input.symbol, order.userId);
 
       if (!bestPrice) break;
       if (input.type === "limit") {
@@ -310,7 +327,7 @@ export function createOrder(input: CreateOrderInput): OrderRecord {
 
   if (input.side === "sell") {
     while (order.qty - order.filledQty > 0) {
-      const bestPrice = bestBidPrice(input.symbol);
+      const bestPrice = bestBidPrice(input.symbol, order.userId);
 
       if (!bestPrice) break;
       if (input.type === "limit") {
@@ -376,6 +393,22 @@ export function createOrder(input: CreateOrderInput): OrderRecord {
 
   const remainingQty = order.qty - order.filledQty;
 
+  if (
+    input.type === "limit" &&
+    remainingQty > 0 &&
+    wouldCrossOwnRestingOrder(order)
+  ) {
+    unlockRemainingReservation(order, remainingQty);
+
+    if (order.filledQty === 0) {
+      order.status = "cancelled";
+    } else {
+      updateOrderStatus(order);
+    }
+
+    return order;
+  }
+
   if (input.type === "market") {
     if (input.side === "buy") {
       refundLockedInr(order.userId, marketBuyRemainingSpend);
@@ -436,6 +469,7 @@ export function createOrder(input: CreateOrderInput): OrderRecord {
 // Replace this O(n) best-price scan with optimized price-level data structures later.
 function bestAskPrice(
   symbol: string,
+  excludedUserId?: string,
 ): { price: number; orders: RestingOrder[] } | null {
   const orderBook = ORDERBOOKS.get(symbol);
   if (!orderBook) return null;
@@ -445,7 +479,8 @@ function bestAskPrice(
 
   for (const [price, orders] of orderBook.asks.entries()) {
     const activeOrders = orders.filter(
-      (order) => order.qty - order.filledQty > 0, // still have quantity left, no empty quantity
+      (order) =>
+        order.qty - order.filledQty > 0 && order.userId !== excludedUserId,
     );
 
     if (activeOrders.length === 0) continue;
@@ -463,6 +498,7 @@ function bestAskPrice(
 
 function bestBidPrice(
   symbol: string,
+  excludedUserId?: string,
 ): { price: number; orders: RestingOrder[] } | null {
   const orderBook = ORDERBOOKS.get(symbol);
   if (!orderBook) {
@@ -474,7 +510,8 @@ function bestBidPrice(
 
   for (const [price, orders] of orderBook.bids.entries()) {
     const activeOrders = orders.filter(
-      (order) => order.qty - order.filledQty > 0, // still have quantity left, no empty quantity
+      (order) =>
+        order.qty - order.filledQty > 0 && order.userId !== excludedUserId,
     );
 
     if (activeOrders.length === 0) continue;
@@ -599,4 +636,34 @@ function refundLockedInr(userId: string, amount: number): void {
 
   inrBalance.locked -= amount;
   inrBalance.available += amount;
+}
+
+function getIdempotencyStoreKey(input: CreateOrderInput): string | null {
+  if (!input.idempotencyKey) return null;
+
+  return `${input.userId}:${input.idempotencyKey}`;
+}
+
+function wouldCrossOwnRestingOrder(order: OrderRecord): boolean {
+  if (order.price === null) return false;
+
+  const orderBook = ORDERBOOKS.get(order.symbol);
+  if (!orderBook) return false;
+
+  const oppositeBookSide = order.side === "buy" ? orderBook.asks : orderBook.bids;
+
+  for (const [price, restingOrders] of oppositeBookSide.entries()) {
+    const hasOwnActiveOrder = restingOrders.some(
+      (restingOrder) =>
+        restingOrder.userId === order.userId &&
+        restingOrder.qty - restingOrder.filledQty > 0,
+    );
+
+    if (!hasOwnActiveOrder) continue;
+
+    if (order.side === "buy" && price <= order.price) return true;
+    if (order.side === "sell" && price >= order.price) return true;
+  }
+
+  return false;
 }

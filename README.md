@@ -220,6 +220,8 @@ Start Redis:
 docker run --name cex-redis -p 6379:6379 -d redis:7
 ```
 
+Use your local PostgreSQL instance for the backend database.
+
 Start the engine:
 
 ```bash
