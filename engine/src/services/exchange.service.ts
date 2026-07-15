@@ -119,7 +119,7 @@ export function cancelOrder(userId: string, orderId: string): OrderRecord {
   const order = getOrder(userId, orderId);
 
   if (order.status === "cancelled") {
-    throw new Error("Order already cancelled");
+    return order;
   }
 
   if (order.status === "filled") {
@@ -169,10 +169,24 @@ export function cancelOrder(userId: string, orderId: string): OrderRecord {
 
 export function createOrder(input: CreateOrderInput): OrderRecord {
   const idempotencyStoreKey = getIdempotencyStoreKey(input);
+  const requestFingerprint = getOrderRequestFingerprint(input);
+
   if (idempotencyStoreKey) {
-    const existingOrderId = IDEMPOTENCY_KEYS.get(idempotencyStoreKey);
-    if (existingOrderId) {
-      const existingOrder = ORDERS.get(existingOrderId);
+    const idempotencyRecord = IDEMPOTENCY_KEYS.get(idempotencyStoreKey);
+
+    if (
+      idempotencyRecord &&
+      Date.now() - idempotencyRecord.createdAt > IDEMPOTENCY_TTL_MS
+    ) {
+      IDEMPOTENCY_KEYS.delete(idempotencyStoreKey);
+    } else if (idempotencyRecord) {
+      if (idempotencyRecord.requestFingerprint !== requestFingerprint) {
+        throw new Error(
+          "Idempotency-Key was already used for a different order",
+        );
+      }
+
+      const existingOrder = ORDERS.get(idempotencyRecord.orderId);
       if (!existingOrder) {
         throw new Error("Idempotent order record missing");
       }
@@ -240,9 +254,18 @@ export function createOrder(input: CreateOrderInput): OrderRecord {
   };
 
   ORDERS.set(order.orderId, order);
-  if (idempotencyStoreKey) {
-    IDEMPOTENCY_KEYS.set(idempotencyStoreKey, order.orderId);
-  }
+
+  const completeOrder = (): OrderRecord => {
+    if (idempotencyStoreKey) {
+      IDEMPOTENCY_KEYS.set(idempotencyStoreKey, {
+        orderId: order.orderId,
+        requestFingerprint,
+        createdAt: Date.now(),
+      });
+    }
+
+    return order;
+  };
 
   if (input.side === "buy") {
     while (order.qty - order.filledQty > 0) {
@@ -406,7 +429,7 @@ export function createOrder(input: CreateOrderInput): OrderRecord {
       updateOrderStatus(order);
     }
 
-    return order;
+    return completeOrder();
   }
 
   if (input.type === "market") {
@@ -420,15 +443,15 @@ export function createOrder(input: CreateOrderInput): OrderRecord {
 
     if (remainingQty > 0 && order.filledQty === 0) {
       order.status = "cancelled";
-      return order;
+      return completeOrder();
     }
 
     updateOrderStatus(order);
-    return order;
+    return completeOrder();
   }
 
   if (remainingQty === 0) {
-    return order;
+    return completeOrder();
   }
 
   if (input.price === null) {
@@ -463,7 +486,7 @@ export function createOrder(input: CreateOrderInput): OrderRecord {
   });
 
   bookSide.set(input.price, priceLevel);
-  return order;
+  return completeOrder();
 }
 
 // Replace this O(n) best-price scan with optimized price-level data structures later.
@@ -642,6 +665,19 @@ function getIdempotencyStoreKey(input: CreateOrderInput): string | null {
   if (!input.idempotencyKey) return null;
 
   return `${input.userId}:${input.idempotencyKey}`;
+}
+
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
+function getOrderRequestFingerprint(input: CreateOrderInput): string {
+  return JSON.stringify({
+    type: input.type,
+    side: input.side,
+    symbol: input.symbol,
+    price: input.price,
+    qty: input.qty,
+    maxSpend: input.maxSpend ?? null,
+  });
 }
 
 function wouldCrossOwnRestingOrder(order: OrderRecord): boolean {

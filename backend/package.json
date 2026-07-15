@@ -8,7 +8,9 @@
     "build": "tsc",
     "start": "node dist/src/index.js",
     "typecheck": "tsc --noEmit",
-    "test:rate-limit": "npm run build && node dist/src/middlewares/rateLimit.middlewares.test.js"
+    "test:rate-limit": "npm run build && node dist/src/middlewares/rateLimit.middlewares.test.js",
+    "test:retry": "npm run build && node --test tests/retry.test.mjs",
+    "test:http": "npm run build && node dist/src/middlewares/http.middlewares.test.js"
   },
   "keywords": [],
   "author": "",

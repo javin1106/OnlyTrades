@@ -8,6 +8,13 @@ interface PendingResponse {
 
 const pendingResponses = new Map<string, PendingResponse>();
 
+export class EngineResponseTimeoutError extends Error {
+  constructor() {
+    super("Engine response timed out");
+    this.name = "EngineResponseTimeoutError";
+  }
+}
+
 export function waitForEngineResponse(
   correlationId: string,
   timeoutMs: number,
@@ -15,7 +22,7 @@ export function waitForEngineResponse(
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       pendingResponses.delete(correlationId);
-      reject(new Error("Engine response timed out"));
+      reject(new EngineResponseTimeoutError());
     }, timeoutMs);
 
     pendingResponses.set(correlationId, {
@@ -24,6 +31,14 @@ export function waitForEngineResponse(
       timeout,
     });
   });
+}
+
+export function cancelEngineResponseWait(correlationId: string): void {
+  const pending = pendingResponses.get(correlationId);
+  if (!pending) return;
+
+  clearTimeout(pending.timeout);
+  pendingResponses.delete(correlationId);
 }
 
 export function resolveEngineResponse(response: EngineResponse): void {

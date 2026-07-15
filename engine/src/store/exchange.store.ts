@@ -48,6 +48,12 @@ export interface CreateOrderInput {
   idempotencyKey?: string;
 }
 
+export interface IdempotencyRecord {
+  orderId: string;
+  requestFingerprint: string;
+  createdAt: number;
+}
+
 export interface RestingOrder {
   orderId: string;
   userId: string;
@@ -87,4 +93,4 @@ export const BALANCES = new Map<string, Record<string, Balance>>();
 export const ORDERS = new Map<string, OrderRecord>();
 export const FILLS: Fill[] = [];
 export const ORDERBOOKS = new Map<string, OrderBook>();
-export const IDEMPOTENCY_KEYS = new Map<string, string>();
+export const IDEMPOTENCY_KEYS = new Map<string, IdempotencyRecord>();

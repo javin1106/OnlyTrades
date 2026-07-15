@@ -4,7 +4,10 @@ import {
   orderIdParamSchema,
   symbolParamSchema,
 } from "../types/exchangeSchema.types.js";
-import { sendToEngine } from "../utils/redisClient.js";
+import {
+  sendCreateOrderToEngine,
+  sendToEngine,
+} from "../utils/redisClient.js";
 
 export async function createOrder(req: Request, res: Response): Promise<void> {
   const result = orderBodySchema.safeParse(req.body);
@@ -22,9 +25,9 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  let idempotencyKey: string | null;
+  let idempotencyKey: string;
   try {
-    idempotencyKey = getIdempotencyKey(req);
+    idempotencyKey = getIdempotencyKey(req) ?? crypto.randomUUID();
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Invalid idempotency key",
@@ -32,17 +35,30 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const engineResponse = await sendToEngine("create_order", {
-    userId,
-    ...result.data,
-    ...(idempotencyKey ? { idempotencyKey } : {}),
-  });
+  res.setHeader("Idempotency-Key", idempotencyKey);
 
-  res
-    .status(engineResponse.ok ? 200 : 400)
-    .json(
-      engineResponse.ok ? engineResponse.data : { error: engineResponse.error },
-    );
+  try {
+    const engineResponse = await sendCreateOrderToEngine({
+      userId,
+      ...result.data,
+      idempotencyKey,
+    });
+
+    res
+      .status(engineResponse.ok ? 200 : 400)
+      .json(
+        engineResponse.ok
+          ? engineResponse.data
+          : { error: engineResponse.error },
+      );
+  } catch (error) {
+    console.error("create_order failed after retries:", error);
+    res.setHeader("Retry-After", "1");
+    res.status(503).json({
+      error: "Exchange engine is temporarily unavailable",
+      idempotencyKey,
+    });
+  }
 }
 
 export async function cancelOrder(req: Request, res: Response): Promise<void> {

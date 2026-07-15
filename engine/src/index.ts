@@ -36,17 +36,28 @@ interface EngineResponse {
 }
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
-const incomingQueue = process.env.INCOMING_QUEUE ?? "backend-to-engine-broker";
+const commandStream =
+  process.env.INCOMING_STREAM ?? "backend-to-engine-stream";
+const consumerGroup =
+  process.env.ENGINE_CONSUMER_GROUP ?? "matching-engine-group";
+const consumerName =
+  process.env.ENGINE_CONSUMER_NAME ??
+  `engine-${process.pid}-${crypto.randomUUID()}`;
+const deadLetterStream = `${commandStream}:dead-letter`;
+const pendingClaimIdleMs = readPositiveNumber(
+  process.env.ENGINE_PENDING_CLAIM_IDLE_MS,
+  30_000,
+);
 
 const brokerClient = createClient({ url: redisUrl });
 const responseClient = createClient({ url: redisUrl });
 
 brokerClient.on("error", (error) => {
-  console.error("Redis broker client error:", error);
+  console.error("Redis command Stream consumer error:", error);
 });
 
 responseClient.on("error", (error) => {
-  console.error("Redis response client error:", error);
+  console.error("Redis response List producer error:", error);
 });
 
 async function sendResponse(
@@ -176,35 +187,153 @@ function handleEngineRequest(message: EngineRequest): unknown {
 }
 
 await Promise.all([brokerClient.connect(), responseClient.connect()]);
+await ensureConsumerGroup();
 
-console.log(`Engine listening on Redis queue: ${incomingQueue}`);
+console.log(
+  `Engine consuming Redis Stream ${commandStream} as ${consumerGroup}/${consumerName}`,
+);
 
 for (;;) {
-  const item = await brokerClient.brPop(incomingQueue, 0);
-  if (!item) continue;
+  try {
+    const entry = (await claimPendingCommand()) ?? (await readNewCommand());
+    if (!entry) continue;
 
+    await processCommandEntry(entry);
+  } catch (error) {
+    console.error("Error consuming command stream:", error);
+    await delay(1_000);
+  }
+}
+
+interface CommandStreamEntry {
+  id: string;
+  rawRequest: string;
+}
+
+async function ensureConsumerGroup(): Promise<void> {
+  try {
+    await brokerClient.xGroupCreate(commandStream, consumerGroup, "0", {
+      MKSTREAM: true,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("BUSYGROUP")) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function claimPendingCommand(): Promise<CommandStreamEntry | null> {
+  const claimed = await brokerClient.xAutoClaim(
+    commandStream,
+    consumerGroup,
+    consumerName,
+    pendingClaimIdleMs,
+    "0-0",
+    { COUNT: 1 },
+  );
+
+  const message = claimed.messages[0];
+  return message ? toCommandStreamEntry(message) : null;
+}
+
+async function readNewCommand(): Promise<CommandStreamEntry | null> {
+  const streams = await brokerClient.xReadGroup(
+    consumerGroup,
+    consumerName,
+    { key: commandStream, id: ">" },
+    { COUNT: 1, BLOCK: 5_000 },
+  );
+
+  const message = streams?.[0]?.messages[0];
+  return message ? toCommandStreamEntry(message) : null;
+}
+
+function toCommandStreamEntry(message: {
+  id: string;
+  message: Record<string, string>;
+}): CommandStreamEntry {
+  return {
+    id: message.id,
+    rawRequest: message.message.request ?? "",
+  };
+}
+
+async function processCommandEntry(entry: CommandStreamEntry): Promise<void> {
   let message: EngineRequest;
 
   try {
-    message = JSON.parse(item.element) as EngineRequest;
-  } catch {
-    console.error("Skipping invalid broker message");
-    continue;
+    const parsed: unknown = JSON.parse(entry.rawRequest);
+    if (!isEngineRequest(parsed)) {
+      throw new Error("Invalid engine request envelope");
+    }
+
+    message = parsed;
+  } catch (error) {
+    await brokerClient.xAdd(deadLetterStream, "*", {
+      sourceId: entry.id,
+      rawRequest: entry.rawRequest,
+      error: error instanceof Error ? error.message : "invalid_request",
+    });
+    await acknowledgeCommand(entry.id);
+    console.error(`Moved invalid command ${entry.id} to ${deadLetterStream}`);
+    return;
   }
 
-  try {
-    const data = handleEngineRequest(message);
+  let response: EngineResponse;
 
-    await sendResponse(message.responseQueue, {
+  try {
+    response = {
       correlationId: message.correlationId,
       ok: true,
-      data,
-    });
+      data: handleEngineRequest(message),
+    };
   } catch (error) {
-    await sendResponse(message.responseQueue, {
+    response = {
       correlationId: message.correlationId,
       ok: false,
       error: error instanceof Error ? error.message : "engine_error",
-    });
+    };
   }
+
+  // Acknowledge only after the response is safely written.
+  await sendResponse(message.responseQueue, response);
+  await acknowledgeCommand(entry.id);
+}
+
+async function acknowledgeCommand(messageId: string): Promise<void> {
+  await brokerClient.xAck(commandStream, consumerGroup, messageId);
+
+  try {
+    await brokerClient.xDel(commandStream, messageId);
+  } catch (error) {
+    // The command is already acknowledged; failed cleanup must not replay it.
+    console.error(`Could not delete acknowledged command ${messageId}:`, error);
+  }
+}
+
+function isEngineRequest(value: unknown): value is EngineRequest {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<EngineRequest>;
+  return (
+    typeof candidate.correlationId === "string" &&
+    typeof candidate.responseQueue === "string" &&
+    typeof candidate.type === "string" &&
+    !!candidate.payload &&
+    typeof candidate.payload === "object"
+  );
+}
+
+function readPositiveNumber(
+  rawValue: string | undefined,
+  fallback: number,
+): number {
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+async function delay(delayMs: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
